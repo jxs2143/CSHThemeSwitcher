@@ -1,31 +1,24 @@
+// Pull in environment variables
 require('dotenv').config();
 
-var express = require('express');
-var passport = require('passport');
-var Strategy = require('passport-openidconnect').Strategy;
+// Define and connect to database
 var mongoose = require('mongoose');
 mongoose.connect(process.env.DB_URI);
-
 var db = mongoose.connection;
-var User;
 db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function() {
-  // we're connected!
-  var userSchema = mongoose.Schema({
+  var memberSchema = mongoose.Schema({
     uid: String,
     css: String
   });
 
-  User = mongoose.model('User', userSchema);
+  Member= mongoose.model('Member', memberSchema);
 });
 
 
 // Configure the OpenID Connect strategy for use by Passport.
-//
-// OAuth 2.0-based strategies require a `verify` function which receives the
-// credential (`accessToken`) for accessing APIs on the user's behalf, along
-// with the user's profile.  The function must invoke `cb` with a user object,
-// which will be set at `req.user` in route handlers after authentication.
+var passport = require('passport');
+var Strategy = require('passport-openidconnect').Strategy;
 passport.use(new Strategy({
   issuer: 'https://sso.csh.rit.edu/auth/realms/csh',
   authorizationURL: 'https://sso.csh.rit.edu/auth/realms/csh/protocol/openid-connect/auth',
@@ -36,23 +29,11 @@ passport.use(new Strategy({
   callbackURL: 'http://localhost:3000/login/callback'
 },
                           function(accessToken, refreshToken, profile, cb) {
-  // In this example, the user's profile is supplied as the user record.
-  // In a production-quality application, the profile should be associated
-  // with a user record in the application's database, which allows for
-  // account linking and authentication with other identity providers.
   return cb(null, profile);
 }));
 
 
 // Configure Passport authenticated session persistence.
-//
-// In order to restore authentication state across HTTP requests, Passport needs
-// to serialize users into and deserialize users out of the session.  In a
-// production-quality application, this would typically be as simple as
-// supplying the user ID when serializing, and querying the user record by ID
-// from the database when deserializing.  However, due to the fact that this
-// example does not have a database, the complete profile is serialized
-// and deserialized.
 passport.serializeUser(function(user, cb) {
   cb(null, user);
 });
@@ -63,81 +44,65 @@ passport.deserializeUser(function(obj, cb) {
 
 
 // Create a new Express application.
+var express = require('express');
 var app = express();
 
-// Configure view engine to render EJS templates.
-//app.set('views', __dirname + '/views');
-//app.set('view engine', 'ejs');
-
-// Use application-level middleware for common functionality, including
-// logging, parsing, and session handling.
-//app.use(require('morgan')('combined'));
-//app.use(require('cookie-parser')());
-app.use(require('body-parser').urlencoded({ extended: true }));
-app.use(require('express-session')({ secret: 'keyboard cat', resave: true, saveUninitialized: true }));
+// Configure session handling
+app.use(require('express-session')({ secret: process.env.EXPRESS_SESSION_SECRET, resave: true, saveUninitialized: true }));
 
 // Initialize Passport and restore authentication state, if any, from the
 // session.
 app.use(passport.initialize());
 app.use(passport.session());
 
-
-// Define routes.
-/*app.get('/',
-        function(req, res) {
-  res.send("Root");
-
-  //res.render('home', { user: req.user });
-});*/
-
+// Authentication: authenticates with CSH OIDC and returns to origin point
 app.get('/login',
         passport.authenticate('openidconnect'));
 
 app.get('/login/callback',
         passport.authenticate('openidconnect', { failureRedirect: '/login' }),
         function(req, res) {
-  res.redirect('/');
+  res.redirect(req.session.returnTo);
 });
 
-/*app.get('/profile',
-        require('connect-ensure-login').ensureLoggedIn(),
-        function(req, res){
-  res.send("Response");
-  //res.render('profile', { user: req.user });
-});*/
-
+// Retrieval
 app.get('/user/:userID',
         require('connect-ensure-login').ensureLoggedIn(),
         function(req, res) {
-  User.findOne({ 'uid' : req.params.userID }, function(err, user) {
-    if(user != null) res.send(user.css);
-    else {
-      res.send(process.env.DEFAULT_CSS);
-      if(err != null) console.error(err);
-    }
+  Member.findOne({ 'uid': req.params.userID }, function(err, member) {
+    var uid = req.user._json.preferred_username;
+    if(member != null)
+      if(member.uid === uid || uid === process.env.ADMIN_UID)
+        res.send(member.css);
+      else res.send(process.env.DEFAULT_CSS);
+    else res.send(process.env.DEFAULT_CSS);
   });
 });
+
+// Write
 app.get('/user/:userID/:css',
         require('connect-ensure-login').ensureLoggedIn(),
         function(req, res) {
-  User.findOne({ 'uid' : req.params.userID}, function(err, user) {
-    if(err) console.error(err);
-    else {
-      console.log(req.params.userID + " : " + req.params.css);
-      if(user == null) {
-        var u = new User({ uid: req.params.userID, css: req.params.css });
-        u.save(function(err, u) {
+  Member.findOne({ 'uid': req.params.userID}, function(err, member) {
+    if(member == null) {
+      var u = new Member
+      ({ 'uid': req.params.userID, css: req.params.css });
+      u.save(function(err, u) {
+        if(err) res.send("ERROR: save failed");
+        else res.send("SUCCESS");
+      });
+      res.send("SUCCESS");
+    } else {
+      var uid = req.user._json.preferred_username;
+      if(member.uid === uid || uid === process.env.ADMIN_UID) {
+        member.css = req.params.css;
+        member.save(function(err, user) {
+          if(err) res.send("ERROR: save failed");
+          else res.send("SUCCESS");
         });
-      }
-      else {
-        user.css = req.params.css;
-        user.save(function(err, user) {
-          if(err) console.error(err);
-        });
-      }
+      } else res.send("ERROR: " + uid + " writing to " + member.uid);
     }
   });
-  res.send('Submitted');
 });
 
-//app.listen(parseInt(process.env.PORT));
+app.listen(parseInt(process.env.PORT));
