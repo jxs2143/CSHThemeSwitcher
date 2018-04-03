@@ -26,7 +26,7 @@ passport.use(new Strategy({
   userInfoURL: 'https://sso.csh.rit.edu/auth/realms/csh/protocol/openid-connect/userinfo',
   clientID: process.env.CLIENT_ID,
   clientSecret: process.env.CLIENT_SECRET,
-  callbackURL: 'http://localhost:3000/login/callback'
+  callbackURL: process.env.HOST + '/login/callback'
 },
                           function(accessToken, refreshToken, profile, cb) {
   return cb(null, profile);
