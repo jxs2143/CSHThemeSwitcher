@@ -14,9 +14,18 @@ app.directive("preview", function() {
     restrict: "E",
     templateUrl: "templates/preview.html"
   }
-})
+});
 
 app.controller("ThemeSwitcherController", ['$scope', '$http', function($scope, $http) {
+
+  // Set the theme colour
+  // Set the background colour for several favicons/bookmarks
+  $scope.themeColour = "#b0197e";
+  $http.get("/api/colour").success(function (response) {
+    $scope.themeColour = response;
+  }).error( function (response) {
+    $scope.themeColour = "#b0197e";
+  });
 
   // Pull uid and name from the api
   // Sets the theme and gets profile image
